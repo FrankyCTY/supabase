@@ -19,13 +19,13 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     case 'GET':
       return handleGetAll(req, res)
     case 'PUT':
-      return handlePost(req, res)
+      return handlePut(req, res)
     case 'POST':
       return handlePost(req, res)
     case 'DELETE':
       return handleDelete(req, res)
     default:
-      res.setHeader('Allow', ['GET', 'POST', 'PUT', 'DELETE'])
+      res.setHeader('Allow', ['GET', 'PUT', 'POST', 'DELETE'])
       res.status(405).json({ data: null, error: { message: `Method ${method} Not Allowed` } })
   }
 }
@@ -36,7 +36,6 @@ type GetResponseData =
 
 const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<GetResponseData>) => {
   const params = req.query as GetRequestData
-  const { ref: projectRef } = req.query
 
   // Platform specific endpoint
   if (params?.visibility === 'project') {
@@ -54,11 +53,27 @@ const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<GetRespons
 
 type PutRequestData =
   paths['/platform/projects/{ref}/content']['put']['requestBody']['content']['application/json']
-type PutResponseData = any
 
-const handlePost = async (req: NextApiRequest, res: NextApiResponse<PutResponseData>) => {
-  const body = req.body as PutRequestData
-  const { ref: projectRef } = req.query
+const handlePut = async (req: NextApiRequest, res: NextApiResponse) => {
+  const updates = req.body
+
+  try {
+    const updatedSnippet = await updateSnippet(updates.id, updates)
+    return res.status(200).json(updatedSnippet)
+  } catch (error) {
+    console.error('Error updating snippet:', error)
+    if (error instanceof Error && error.message.includes('not found')) {
+      return res.status(404).json({ error: error.message })
+    }
+    return res.status(500).json({ error: 'Failed to update snippet' })
+  }
+}
+
+type PostRequestData =
+  paths['/platform/projects/{ref}/content']['post']['requestBody']['content']['application/json']
+
+const handlePost = async (req: NextApiRequest, res: NextApiResponse) => {
+  const body = req.body as PostRequestData
 
   const { data, error } = SnippetSchema.safeParse(body)
 
@@ -68,27 +83,11 @@ const handlePost = async (req: NextApiRequest, res: NextApiResponse<PutResponseD
   }
 
   try {
-    const savedSnippet = await saveSnippet(data, projectRef as string)
+    const savedSnippet = await saveSnippet(data)
     return res.status(200).json(savedSnippet)
   } catch (error) {
     console.error('Error creating snippet:', error)
     return res.status(500).json({ error: 'Failed to create snippet' })
-  }
-}
-
-const handlePut = async (req: NextApiRequest, res: NextApiResponse) => {
-  const { ref: projectRef } = req.query
-  const updates = req.body
-
-  try {
-    const updatedSnippet = await updateSnippet(updates.id, updates, projectRef as string)
-    return res.status(200).json(updatedSnippet)
-  } catch (error) {
-    console.error('Error updating snippet:', error)
-    if (error instanceof Error && error.message.includes('not found')) {
-      return res.status(404).json({ error: error.message })
-    }
-    return res.status(500).json({ error: 'Failed to update snippet' })
   }
 }
 

@@ -50,33 +50,33 @@ export const SnippetSchema = z.object({
   ]),
   project_id: z.number().default(1),
   folder_id: z.string().nullable().default(null),
-  owner_id: z.number(),
+  owner_id: z.number().default(1),
   owner: z
     .object({
       id: z.number(),
       username: z.string(),
     })
-    .default({ id: 1, username: 'system' }),
+    .default({ id: 1, username: 'johndoe' }),
   updated_by: z
     .object({
       id: z.number(),
       username: z.string(),
     })
-    .default({ id: 1, username: 'system' }),
+    .default({ id: 1, username: 'johndoe' }),
 })
 
 export const FolderSchema = z.object({
   id: z.string(),
   name: z.string(),
-  owner_id: z.number(),
+  owner_id: z.number().default(1),
   parent_id: z.string().nullable(),
-  project_id: z.number(),
+  project_id: z.number().default(1),
 })
 
 export type Snippet = z.infer<typeof SnippetSchema>
 export type Folder = z.infer<typeof FolderSchema>
 
-const buildSnippet = (filename: string, content: string) => {
+const buildSnippet = (filename: string, content: string, folderId: string | null) => {
   const snippet: Snippet = {
     id: generateDeterministicUuid(filename),
     inserted_at: new Date().toISOString(),
@@ -92,11 +92,11 @@ const buildSnippet = (filename: string, content: string) => {
       schema_version: '1.0',
     },
     visibility: 'user',
-    project_id: 0,
-    folder_id: null,
-    owner_id: 0,
-    owner: { id: 0, username: 'system' },
-    updated_by: { id: 0, username: 'system' },
+    project_id: 1,
+    folder_id: folderId,
+    owner_id: 1,
+    owner: { id: 1, username: 'johndoe' },
+    updated_by: { id: 1, username: 'johndoe' },
   }
 
   return snippet
@@ -106,9 +106,9 @@ const buildFolder = (name: string) => {
   const folder: Folder = {
     id: generateDeterministicUuid(name),
     name: name,
-    owner_id: 0,
+    owner_id: 1,
     parent_id: null,
-    project_id: 0,
+    project_id: 1,
   }
 
   return folder
@@ -126,28 +126,43 @@ export async function ensureSnippetsDirectory() {
 }
 
 /**
- * Reads all snippets from the filesystem
+ * Reads all snippets from the filesystem recursively
  */
 export async function readAllSnippets(): Promise<Snippet[]> {
   await ensureSnippetsDirectory()
-  const files = await fs.readdir(SNIPPETS_DIR)
 
-  const snippets = await Promise.all(
-    files
-      .filter((file) => file.endsWith('.sql'))
-      .map(async (file) => {
-        const content = await fs.readFile(path.join(SNIPPETS_DIR, file), 'utf-8')
-        return buildSnippet(file, content)
-      })
-  )
+  const readSnippetsRecursively = async (
+    dirPath: string,
+    folderName: string | null
+  ): Promise<Snippet[]> => {
+    const items = await fs.readdir(dirPath, { withFileTypes: true })
+    const snippets: Snippet[] = []
 
-  return snippets
+    for (const item of items) {
+      const itemPath = path.join(dirPath, item.name)
+
+      if (item.isDirectory()) {
+        // Recursively read snippets from subdirectories
+        const subSnippets = await readSnippetsRecursively(itemPath, item.name)
+        snippets.push(...subSnippets)
+      } else if (item.isFile() && item.name.endsWith('.sql')) {
+        // Read SQL file and create snippet
+        const content = await fs.readFile(itemPath, 'utf-8')
+        const folderId = folderName ? generateDeterministicUuid(folderName) : null
+        snippets.push(buildSnippet(item.name, content, folderId))
+      }
+    }
+
+    return snippets
+  }
+
+  return await readSnippetsRecursively(SNIPPETS_DIR, null)
 }
 
 /**
  * Saves a snippet to the filesystem
  */
-export async function saveSnippet(snippet: Snippet, projectRef: string): Promise<Snippet> {
+export async function saveSnippet(snippet: Snippet): Promise<Snippet> {
   await ensureSnippetsDirectory()
 
   const snippetName = snippet.name
@@ -156,7 +171,7 @@ export async function saveSnippet(snippet: Snippet, projectRef: string): Promise
   const filePath = path.join(SNIPPETS_DIR, `${snippetName}.sql`)
   await fs.writeFile(filePath, JSON.stringify(content, null, 2))
 
-  const result = buildSnippet(snippetName, content)
+  const result = buildSnippet(snippetName, content, snippet.folder_id)
   return result
 }
 
@@ -175,7 +190,7 @@ export async function deleteSnippet(id: string): Promise<void> {
 }
 
 /**
- * Updates a snippet in the filesystem
+ * Updates a snippet in the filesystem. It also handles renaming and moving.
  */
 export async function updateSnippet(id: string, updates: Partial<Snippet>): Promise<Snippet> {
   await ensureSnippetsDirectory()
@@ -188,12 +203,54 @@ export async function updateSnippet(id: string, updates: Partial<Snippet>): Prom
   }
 
   try {
-    const snippetName = updates.name || foundSnippet.name
-    const snippetContent = updates.content?.sql || foundSnippet.content.sql
-    const filePath = path.join(SNIPPETS_DIR, `${snippetName}.sql`)
+    const snippetName = updates.name ?? foundSnippet.name
+    const snippetContent = updates.content?.sql ?? foundSnippet.content.sql
+    const snippetFolderId = updates.folder_id ?? foundSnippet.folder_id
 
-    await fs.writeFile(filePath, JSON.stringify(snippetContent, null, 2))
-    const updatedSnippet = buildSnippet(snippetName, snippetContent)
+    const folders = await readFolders()
+    // Determine the old file path
+    const oldFileName = `${foundSnippet.name}.sql`
+    let oldFilePath: string
+    if (foundSnippet.folder_id) {
+      const oldFolder = folders.find((f) => f.id === foundSnippet.folder_id)
+      if (oldFolder) {
+        oldFilePath = path.join(SNIPPETS_DIR, oldFolder.name, oldFileName)
+      } else {
+        oldFilePath = path.join(SNIPPETS_DIR, oldFileName)
+      }
+    } else {
+      oldFilePath = path.join(SNIPPETS_DIR, oldFileName)
+    }
+
+    // Determine the new file path
+    const newFileName = `${snippetName}.sql`
+    let newFilePath: string
+    if (snippetFolderId) {
+      const newFolder = folders.find((f) => f.id === snippetFolderId)
+      if (!newFolder) {
+        throw new Error(`Folder with id ${snippetFolderId} not found`)
+      }
+      newFilePath = path.join(SNIPPETS_DIR, newFolder.name, newFileName)
+    } else {
+      newFilePath = path.join(SNIPPETS_DIR, newFileName)
+    }
+
+    // Write the file to the new location
+    await fs.writeFile(newFilePath, JSON.stringify(snippetContent, null, 2))
+
+    // If the file location changed, delete the old file
+    if (oldFilePath !== newFilePath) {
+      try {
+        await fs.unlink(oldFilePath)
+      } catch (error) {
+        // If old file doesn't exist, that's ok - it might have been manually moved
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error
+        }
+      }
+    }
+
+    const updatedSnippet = buildSnippet(snippetName, snippetContent, snippetFolderId)
     return updatedSnippet
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -210,9 +267,7 @@ export async function readFolders(): Promise<Folder[]> {
   await ensureSnippetsDirectory()
   const items = await fs.readdir(SNIPPETS_DIR, { withFileTypes: true })
 
-  const folders = items
-    .filter((item) => item.isDirectory())
-    .map((item) => buildFolder(item.name, {}))
+  const folders = items.filter((item) => item.isDirectory()).map((item) => buildFolder(item.name))
 
   return folders
 }
@@ -220,13 +275,13 @@ export async function readFolders(): Promise<Folder[]> {
 /**
  * Creates a new folder as an actual directory
  */
-export async function createFolder(folder: Omit<Folder, 'id'>): Promise<Folder> {
+export async function createFolder(folderName: string): Promise<Folder> {
   await ensureSnippetsDirectory()
 
-  const newFolder: Folder = { ...folder, id: uuidv4() }
-  const folderPath = path.join(SNIPPETS_DIR, newFolder.name)
+  const folderPath = path.join(SNIPPETS_DIR, folderName)
 
   await fs.mkdir(folderPath, { recursive: true })
+  const newFolder = buildFolder(folderName)
 
   return newFolder
 }
@@ -239,7 +294,6 @@ export async function deleteFolder(id: string): Promise<void> {
   await ensureSnippetsDirectory()
 
   const folders = await readFolders()
-  console.log('Folders:', folders)
   const folder = folders.find((f) => f.id === id)
 
   if (!folder) {

@@ -24,10 +24,10 @@ type GetResponseData =
   paths['/platform/projects/{ref}/content/folders/{id}']['get']['responses']['200']['content']['application/json']
 
 const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<GetResponseData>) => {
-  const folders = (await readFolders()).filter((f) => f.parent_id === req.query.id)
+  const folderId = req.query.id as string
 
-  const snippetsData = await readAllSnippets()
-  const snippets = snippetsData.filter((s) => s.folder_id === req.query.id)
+  const folders = (await readFolders()).filter((f) => f.parent_id === folderId)
+  const snippets = (await readAllSnippets()).filter((s) => s.folder_id === folderId)
 
   return res.status(200).json({ data: { folders: folders, contents: snippets } })
 }

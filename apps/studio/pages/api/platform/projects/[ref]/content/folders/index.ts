@@ -31,6 +31,7 @@ type GetRequestData =
 const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<GetResponseData>) => {
   const folders = await readFolders()
   const snippets = (await readAllSnippets()).filter((s) => s.folder_id === null)
+  console.log(snippets)
 
   res.status(200).json({ data: { folders, contents: snippets } })
 }
@@ -43,12 +44,7 @@ type PostRequestData =
 const handlePost = async (req: NextApiRequest, res: NextApiResponse<PostResponseData>) => {
   const { name, parent_id } = req.body as PostRequestData
 
-  const folder = await createFolder({
-    name,
-    parent_id: parent_id || null,
-    owner_id: 1,
-    project_id: 1,
-  })
+  const folder = await createFolder(name)
 
   return res.status(200).json(folder)
 }
