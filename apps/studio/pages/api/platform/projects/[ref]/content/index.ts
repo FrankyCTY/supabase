@@ -1,16 +1,16 @@
 import { paths } from 'api-types'
-import apiWrapper from 'lib/api/apiWrapper'
 import { NextApiRequest, NextApiResponse } from 'next'
+
+import apiWrapper from 'lib/api/apiWrapper'
 import {
   deleteSnippet,
-  filterSnippetsByFavorite,
   readAllSnippets,
   saveSnippet,
   SnippetSchema,
   updateSnippet,
-} from './_helpers'
+} from 'lib/api/snippets.utils'
 
-export default (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
+const wrappedHandler = (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
 
 async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { method } = req
@@ -45,8 +45,7 @@ const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<GetRespons
 
   try {
     const snippets = await readAllSnippets()
-    const filteredSnippets = filterSnippetsByFavorite(snippets, params?.favorite)
-    return res.status(200).json({ data: filteredSnippets })
+    return res.status(200).json({ data: snippets })
   } catch (error) {
     console.error('Error fetching snippets:', error)
     return res.status(500).json({ data: [] })
@@ -108,3 +107,5 @@ const handleDelete = async (req: NextApiRequest, res: NextApiResponse) => {
     return res.status(500).json({ error: 'Failed to delete snippet' })
   }
 }
+
+export default wrappedHandler

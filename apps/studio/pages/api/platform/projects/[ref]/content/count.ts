@@ -1,9 +1,10 @@
 import { paths } from 'api-types'
-import apiWrapper from 'lib/api/apiWrapper'
 import { NextApiRequest, NextApiResponse } from 'next'
-import { readAllSnippets } from './_helpers'
 
-export default (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
+import apiWrapper from 'lib/api/apiWrapper'
+import { readAllSnippets } from 'lib/api/snippets.utils'
+
+const wrappedHandler = (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
 
 async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { method } = req
@@ -29,3 +30,5 @@ const handleGetAll = async (req: NextApiRequest, res: NextApiResponse<ResponseDa
     private: snippets.filter((s) => s.visibility === 'user').length,
   })
 }
+
+export default wrappedHandler

@@ -1,9 +1,10 @@
 import { paths } from 'api-types'
-import apiWrapper from 'lib/api/apiWrapper'
 import { NextApiRequest, NextApiResponse } from 'next'
-import { readAllSnippets, readFolders } from '../_helpers'
 
-export default (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
+import apiWrapper from 'lib/api/apiWrapper'
+import { readAllSnippets, readFolders } from 'lib/api/snippets.utils'
+
+const wrappedHandler = (req: NextApiRequest, res: NextApiResponse) => apiWrapper(req, res, handler)
 
 async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { method } = req
@@ -38,3 +39,5 @@ const handlePatch = async (req: NextApiRequest, res: NextApiResponse<PatchRespon
   // Platform specific endpoint
   return res.status(200).json({} as never)
 }
+
+export default wrappedHandler
